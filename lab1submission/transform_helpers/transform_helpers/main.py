@@ -2,13 +2,13 @@ import rclpy
 from rclpy.node import Node
 # TODO: Import the message type that holds data describing robot joint angle states
 # this tutorial may have hints: https://docs.ros.org/en/rolling/Tutorials/Intermediate/URDF/Using-URDF-with-Robot-State-Publisher.html#publish-the-state
-
+from sensor_msgs.msg import JointState
 # TODO: Import the class that publishes coordinate frame transform information
 # this tutorial may have hints: https://docs.ros.org/en/rolling/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
-
+from tf2_ros import TransformBroadcaster
 # TODO: Import the message type that expresses a transform from one coordinate frame to another
 # this same tutorial from earlier has hints: https://docs.ros.org/en/rolling/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
-
+from geometry_msgs.msg import TransformStamped
 import numpy as np
 from numpy.typing import NDArray
 
@@ -33,14 +33,24 @@ def get_transform_n_to_n_minus_one(n: int, theta: float) -> NDArray:
     # this function calculates the transform to go from n to n-1 
     # using modified denavit hartenberg parameters
 
-    transform_matrix = np.zeros((4,4))
-
     n_minus_one = n - 1
+
+    ai_minus_one = DH_PARAMS[n_minus_one, 0]
+    di = DH_PARAMS[n_minus_one, 1]
+    alphai_minus_one = DH_PARAMS[n_minus_one, 2]
 
     # TODO: implement this function
     # note that it may be helpful to refer to documentation on modified denavit hartenberg parameters:
     # https://en.wikipedia.org/wiki/Denavit%E2%80%93Hartenberg_parameters#Modified_DH_parameters
-    raise NotImplementedError
+    # tf_matrix is defined by the modified DH parameters
+    transform_matrix = np.array([
+        [np.cos(theta), -np.sin(theta), 0, ai_minus_one],
+        [np.sin(theta) * np.cos(alphai_minus_one), np.cos(theta) * np.cos(alphai_minus_one), -np.sin(alphai_minus_one), -np.sin(alphai_minus_one) * di],
+        [np.sin(theta) * np.sin(alphai_minus_one), np.cos(theta) * np.sin(alphai_minus_one), np.cos(alphai_minus_one), np.cos(alphai_minus_one) * di],
+        [0, 0, 0, 1]
+    ])
+    
+    return np.array(transform_matrix)
 
 
 
@@ -51,7 +61,7 @@ class ForwardKinematicCalculator(Node):
 
         # TODO: create a subscriber to joint states, can you find which topic
         # this publishes on by using ros2 topic list while running the example?
-        raise NotImplementedError
+        self.joint_sub = self.create_subscription(JointState, 'joint_states', self.publish_transforms, 10)
         self.joint_sub  # prevent unused variable warning
 
         # Initialize the transform broadcaster
@@ -98,7 +108,13 @@ class ForwardKinematicCalculator(Node):
             # TODO: set the translation and rotation in the message we have created
             # you can check the documentation for the message type for ros2
             # to see what members it has
-            raise NotImplementedError
+            t.transform.translation.x = transform[0, 3]
+            t.transform.translation.y = transform[1, 3]
+            t.transform.translation.z = transform[2, 3]
+            t.transform.rotation.x = quat.x
+            t.transform.rotation.y = quat.y
+            t.transform.rotation.z = quat.z
+            t.transform.rotation.w = quat.w
 
             self.tf_broadcaster.sendTransform(t)
     
@@ -110,6 +126,8 @@ def main(args=None):
 
     # TODO: initialize our class and start it spinning
     # this example may be helpful: https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html#write-the-subscriber-node
+    fk_calculator = ForwardKinematicCalculator()
+    rclpy.spin(fk_calculator)
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
