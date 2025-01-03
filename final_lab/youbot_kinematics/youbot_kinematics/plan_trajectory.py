@@ -12,6 +12,8 @@ import numpy as np
 from youbot_kinematics.youbotKineStudent import YoubotKinematicStudent
 from youbot_kinematics.target_data import TARGET_JOINT_POSITIONS
 
+from scipy.spatial.transform import Rotation as R
+from builtin_interfaces.msg import Duration
 
 class YoubotTrajectoryPlanning(Node):
     def __init__(self):
@@ -55,7 +57,18 @@ class YoubotTrajectoryPlanning(Node):
         # 5. Create a JointTrajectory message.
 
         # Your code starts here ------------------------------
-        raise NotImplementedError
+        traj = JointTrajectory()
+        target_tf, _ = self.load_targets()
+        sorted_order, min_dist = self.get_shortest_path(target_tf)
+        full_checkpoint_tfs = self.intermediate_tfs(sorted_order, target_tf, 4)
+        self.publish_traj_tfs(full_checkpoint_tfs)
+        full_checkpoint_joints = self.full_checkpoints_to_joints(full_checkpoint_tfs, self.kdl_youbot.current_joint_position)
+        traj.points = []
+        for i in range(full_checkpoint_joints.shape[1]):
+            point = JointTrajectoryPoint()
+            point.positions = full_checkpoint_joints[:, i].tolist()
+            point.time_from_start = Duration(sec=1, nanosec=0)
+            traj.points.append(point)
 
         # Your code ends here ------------------------------
 
@@ -86,7 +99,9 @@ class YoubotTrajectoryPlanning(Node):
         # TODO: populate the transforms in the target_cart_tf object
         # populate the joint positions in the target_joint_positions object
         # Your code starts here ------------------------------
-        raise NotImplementedError
+        for i in range(num_target_positions):
+            target_joint_positions[:, i + 1] = TARGET_JOINT_POSITIONS[i]
+            target_cart_tf[:, :, i + 1] = self.kdl_youbot.forward_kinematics(list(TARGET_JOINT_POSITIONS[i]))
         # Your code ends here ------------------------------
 
         self.get_logger().info(f"{target_cart_tf.shape} target poses")
@@ -112,9 +127,21 @@ class YoubotTrajectoryPlanning(Node):
         # TODO: implement this method. Make it flexible to accomodate different numbers of targets.
         # Your code starts here ------------------------------
         # Sort the shortest distance and permutation here
-        raise NotImplementedError
-        # Your code ends here ------------------------------
+        # Record distances to initial tf
+        all_possible_paths = permutations(range(1, num_checkpoints))
 
+        min_dist = np.inf
+        sorted_order = None
+        for path in all_possible_paths:
+            path = [0] + list(path)
+            dist = 0
+            for i in range(num_checkpoints - 1):
+                dist += np.linalg.norm(checkpoints_tf[:3, 3, path[i]] - checkpoints_tf[:3, 3, path[i + 1]])
+            if dist < min_dist:
+                min_dist = dist
+                sorted_order = np.array(path)
+
+        # Your code ends here ------------------------------
         assert isinstance(sorted_order, np.ndarray)
         assert sorted_order.shape == (num_checkpoints,)
         assert isinstance(min_dist, float)
@@ -147,6 +174,7 @@ class YoubotTrajectoryPlanning(Node):
             marker.pose.position.x = tfs[0, -1, i]
             marker.pose.position.y = tfs[1, -1, i]
             marker.pose.position.z = tfs[2, -1, i]
+            #print(f"Publishing Position {i}: {marker.pose.position.x}, {marker.pose.position.y}, {marker.pose.position.z}")
             self.checkpoint_pub.publish(marker)
 
     def intermediate_tfs(self, sorted_checkpoint_idx, target_checkpoint_tfs, num_points):
@@ -162,9 +190,24 @@ class YoubotTrajectoryPlanning(Node):
         """
         # TODO: implement this
         # Your code starts here ------------------------------
-        raise NotImplementedError
-        # Your code ends here ------------------------------
-       
+        num_target_positions = len(target_checkpoint_tfs)
+        # for i in range(num_target_positions):
+        #     print(f"Checkpoint {i}: {target_checkpoint_tfs[0, :, i]}")
+
+        full_checkpoint_tfs = np.zeros((4, 4, 4 * num_points + 5))
+        full_checkpoint_tfs[:, :, 0] = target_checkpoint_tfs[:, :, 0]
+
+        for i in range(1, num_target_positions):
+            start_index = (i - 1) * (num_points + 1)
+            end_index = i * (num_points + 1)
+            start_tf = full_checkpoint_tfs[:, :, start_index]
+            end_tf = target_checkpoint_tfs[:, :, sorted_checkpoint_idx[i]]
+            # Fill in the target checkpoints
+            full_checkpoint_tfs[:, :, end_index] = end_tf
+            # Fill in the intermediary checkpoints
+            full_checkpoint_tfs[:, :, start_index + 1:end_index]\
+                = self.decoupled_rot_and_trans(start_tf, end_tf, num_points)
+
         return full_checkpoint_tfs
 
     def decoupled_rot_and_trans(self, checkpoint_a_tf, checkpoint_b_tf, num_points):
@@ -184,7 +227,27 @@ class YoubotTrajectoryPlanning(Node):
         self.get_logger().info(str(checkpoint_b_tf))
         # TODO: implement this
         # Your code starts here ------------------------------
-        raise NotImplementedError
+        # Decouple the rotation and translation
+        tfs = np.zeros((4, 4, num_points))
+        R_init = checkpoint_a_tf[:3, :3]
+        p_init = checkpoint_a_tf[:3, 3]
+        R_des = checkpoint_b_tf[:3, :3]
+        p_des = checkpoint_b_tf[:3, 3]
+
+        # Convert mat to quaternion
+        q_init = R.from_matrix(R_init).as_quat()
+        q_des = R.from_matrix(R_des).as_quat()
+
+        # Intermediary
+        for i in range(num_points):
+            t = (i + 1) / (num_points + 1)
+            # Use LERP to interpolate between the two quaternions
+            q_inter = (1 - t) * q_init + t * q_des
+            # Normalize to ensure it is a unit quaternion
+            q_inter = q_inter / np.linalg.norm(q_inter)
+            R_inter = R.from_quat(q_inter).as_matrix()
+            p_inter = (1 - t) * p_init + t * p_des
+            tfs[:, :, i] = np.block([[R_inter, p_inter.reshape(3, 1)], [0, 0, 0, 1]])
         # Your code ends here ------------------------------
         return tfs
 
@@ -201,7 +264,12 @@ class YoubotTrajectoryPlanning(Node):
         """
         # TODO: Implement this
         # Your code starts here ------------------------------
-        raise NotImplementedError
+        num_points = full_checkpoint_tfs.shape[2]
+        q_checkpoints = np.zeros((5, num_points))
+        q_checkpoints[:, 0] = init_joint_position
+
+        for i in range(1, num_points):
+            q_checkpoints[:, i], _ = self.ik_position_only(full_checkpoint_tfs[:, :, i], q_checkpoints[:, i - 1])
         # Your code ends here ------------------------------
 
         return q_checkpoints
@@ -222,11 +290,26 @@ class YoubotTrajectoryPlanning(Node):
         # Jacobian that will affect the position of the error.
 
         # Your code starts here ------------------------------
+        # Delta p = J(q) * delta q
+        # So, delta q = J(q)^-1 * delta p
+        # Keep iterating until the error is small
+        p_target = pose[:3, 3]
+        q = q0
 
-        raise NotImplementedError
-        
+        for i in range(num):
+            T = self.kdl_youbot.forward_kinematics(list(q))
+            p = T[:3, 3]
+            J = self.kdl_youbot.get_jacobian(list(q))[:3, :]
+            error = p_target - p
+            q += lam * np.linalg.pinv(J) @ error
+
+            if self.kdl_youbot.check_singularity(list(q)):
+                self.get_logger().info(f"Singularity {q} reached")
+                break
+            if np.linalg.norm(error) < 1e-6:
+                break
+  
         # Your code ends here ------------------------------
-
         return q, error
 
 

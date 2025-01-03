@@ -72,13 +72,32 @@ class YoubotKinematicStudent(YoubotKinematicBase):
         assert len(joint) == 5
 
         # TODO: create the jacobian matrix
-
+        jacobian = np.zeros((6, 5))
         # Your code starts here ----------------------------
 
         # For your solution to match the KDL Jacobian, z0 needs to be set [0, 0, -1] instead of [0, 0, 1], since that is how its defined in the URDF.
         # Both are correct.
         # Your code starts here ----------------------------
-        raise NotImplementedError
+        # Define the end effector position
+        T_e = self.forward_kinematics(joint)
+        P_e = T_e[:3, 3]
+
+        for i in range(5):
+            # i here is different from the Jacobian formula, it is specified by self.fk
+            # We calculate from z0/p0 to z4/p4
+            T_i = self.forward_kinematics(joint, i)
+            P_i_ = T_i[:3, 3]
+            if i == 0:
+                Z_i = [0, 0, -1]
+            else:
+                Z_i = T_i[:3, 2]
+            
+            # For revolute joints
+            # J_pi-1 = z_i-1 x (p_e - p_i-1)
+            # J_oi-1 = z_i-1
+            jacobian[:3, i] = np.cross(Z_i, P_e - P_i_)
+            jacobian[3:, i] = Z_i
+
         # Your code ends here ------------------------------
         assert jacobian.shape == (6, 5)
         return jacobian
@@ -98,7 +117,9 @@ class YoubotKinematicStudent(YoubotKinematicBase):
         assert len(joint) == 5
         # TODO: Implement this
         # Your code starts here ----------------------------
-        raise NotImplementedError
+        jacobian = self.get_jacobian(joint)
+        singularity = bool(np.linalg.matrix_rank(jacobian) < 5)
+
         # Your code ends here ------------------------------
         assert isinstance(singularity, bool)
         return singularity
