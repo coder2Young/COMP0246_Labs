@@ -15,6 +15,8 @@ from youbot_kinematics.target_data import TARGET_JOINT_POSITIONS
 from scipy.spatial.transform import Rotation as R
 from builtin_interfaces.msg import Duration
 
+NUM_INTER_POINT = 3
+
 class YoubotTrajectoryPlanning(Node):
     def __init__(self):
         # Initialize node
@@ -60,7 +62,7 @@ class YoubotTrajectoryPlanning(Node):
         traj = JointTrajectory()
         target_tf, _ = self.load_targets()
         sorted_order, min_dist = self.get_shortest_path(target_tf)
-        full_checkpoint_tfs = self.intermediate_tfs(sorted_order, target_tf, 4)
+        full_checkpoint_tfs = self.intermediate_tfs(sorted_order, target_tf, NUM_INTER_POINT)
         self.publish_traj_tfs(full_checkpoint_tfs)
         full_checkpoint_joints = self.full_checkpoints_to_joints(full_checkpoint_tfs, self.kdl_youbot.current_joint_position)
         traj.points = []
@@ -194,8 +196,8 @@ class YoubotTrajectoryPlanning(Node):
         print(f"Num target positions: {num_target_positions}")
         # for i in range(num_target_positions):
         #     print(f"Checkpoint {i}: {target_checkpoint_tfs[0, :, i]}")
-
-        full_checkpoint_tfs = np.zeros((4, 4, 4 * num_points + 5))
+        total_points = (num_target_positions - 1) * num_points + num_target_positions
+        full_checkpoint_tfs = np.zeros((4, 4, total_points))
         full_checkpoint_tfs[:, :, 0] = target_checkpoint_tfs[:, :, 0]
 
         for i in range(1, num_target_positions):
