@@ -190,7 +190,8 @@ class YoubotTrajectoryPlanning(Node):
         """
         # TODO: implement this
         # Your code starts here ------------------------------
-        num_target_positions = len(target_checkpoint_tfs)
+        num_target_positions = target_checkpoint_tfs.shape[2]
+        print(f"Num target positions: {num_target_positions}")
         # for i in range(num_target_positions):
         #     print(f"Checkpoint {i}: {target_checkpoint_tfs[0, :, i]}")
 
